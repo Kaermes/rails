@@ -521,16 +521,8 @@ module ActiveRecord
           connection.transaction(:requires_new => true) do
             fixture_sets.each do |fs|
               conn = fs.model_class.respond_to?(:connection) ? fs.model_class.connection : connection
-              table_rows = fs.table_rows
-
-              table_rows.keys.each do |table|
-                conn.delete "DELETE FROM #{conn.quote_table_name(table)}", 'Fixture Delete'
-              end
-
-              table_rows.each do |fixture_set_name, rows|
-                rows.each do |row|
-                  conn.insert_fixture(row, fixture_set_name)
-                end
+              fs.fixture_sql(conn).each do |stmt|
+                conn.execute stmt
               end
             end
 
@@ -602,7 +594,17 @@ module ActiveRecord
       fixtures.size
     end
 
-    # Returns a hash of rows to be inserted. The key is the table, the value is
+    def fixture_sql(conn)
+      table_rows = self.table_rows
+
+      table_rows.keys.map { |table|
+        "DELETE FROM #{conn.quote_table_name(table)}"
+      }.concat table_rows.flat_map { |fixture_set_name, rows|
+        rows.map { |row| conn.fixture_sql(row, fixture_set_name) }
+      }
+    end
+
+    # Return a hash of rows to be inserted. The key is the table, the value is
     # a list of rows to insert to that table.
     def table_rows
       now = config.default_timezone == :utc ? Time.now.utc : Time.now
