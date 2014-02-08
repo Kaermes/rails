@@ -1828,6 +1828,25 @@ class TestRoutingMapper < ActionDispatch::IntegrationTest
     assert_equal '/comments/3/preview', preview_comment_path(:id => '3')
   end
 
+  def test_shallow_nested_resources_within_namespace
+    draw do
+      namespace :admin do
+        shallow do
+          resources :users do
+            resources :articles do
+              resources :comments
+            end
+          end
+        end
+      end
+    end
+
+    get '/admin/articles/3/comments'
+
+    assert_equal 'admin/comments#index', @response.body
+    assert_equal '/admin/articles/3/edit', admin_article_comments_path(:article_id => '3')
+  end
+
   def test_shallow_nested_resources_within_scope
     draw do
       scope '/hello' do
