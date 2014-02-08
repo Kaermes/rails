@@ -1844,7 +1844,7 @@ class TestRoutingMapper < ActionDispatch::IntegrationTest
     get '/admin/articles/3/comments'
 
     assert_equal 'admin/comments#index', @response.body
-    assert_equal '/admin/articles/3/edit', admin_article_comments_path(:article_id => '3')
+    assert_equal '/admin/articles/3/comments', admin_article_comments_path(:article_id => '3')
   end
 
   def test_shallow_nested_resources_within_scope
