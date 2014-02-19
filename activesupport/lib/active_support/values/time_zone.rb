@@ -183,15 +183,11 @@ module ActiveSupport
       "Samoa"                        => "Pacific/Apia"
     }
 
-    cattr_accessor :mapping do
-      MAPPING
-    end
-
-
     UTC_OFFSET_WITH_COLON = '%s%02d:%02d'
     UTC_OFFSET_WITHOUT_COLON = UTC_OFFSET_WITH_COLON.sub(':', '')
 
     @lazy_zones_map = ThreadSafe::Cache.new
+    @mapping = Rails.application.config.time_zone_mapping
 
     # Assumes self represents an offset from UTC in seconds (as returned from
     # Time#utc_offset) and turns this into an +HH:MM formatted string.
@@ -218,13 +214,6 @@ module ActiveSupport
       @utc_offset = utc_offset
       @tzinfo = tzinfo || TimeZone.find_tzinfo(name)
       @current_period = nil
-    end
-
-    def self.set_mapping(mapping = nil)
-      self.mapping = mapping
-      @zones = nil
-      @lazy_zones_map = ThreadSafe::Cache.new
-      @zones_map = nil
     end
 
     # Returns the offset of this time zone from UTC in seconds.
@@ -255,7 +244,7 @@ module ActiveSupport
     # Compare #name and TZInfo identifier to a supplied regexp, returning +true+
     # if a match is found.
     def =~(re)
-      re === name || re === self.mapping[name]
+      re === name || re === @mapping[name]
     end
 
     # Returns a textual representation of this time zone.
@@ -369,7 +358,7 @@ module ActiveSupport
     end
 
     def self.find_tzinfo(name)
-      TZInfo::TimezoneProxy.new(self.mapping[name] || name)
+      TZInfo::TimezoneProxy.new(@mapping[name] || name)
     end
 
     class << self
@@ -391,7 +380,7 @@ module ActiveSupport
 
       def zones_map
         @zones_map ||= begin
-          self.mapping.each_key {|place| self[place]} # load all the zones
+          @mapping.each_key {|place| self[place]} # load all the zones
           @lazy_zones_map
         end
       end

@@ -11,7 +11,7 @@ module Rails
                     :force_ssl, :helpers_paths, :logger, :log_formatter, :log_tags,
                     :railties_order, :relative_url_root, :secret_key_base, :secret_token,
                     :serve_static_assets, :ssl_options, :static_cache_control, :session_options,
-                    :time_zone, :reload_classes_only_on_change,
+                    :time_zone, :time_zone_mapping, :reload_classes_only_on_change,
                     :beginning_of_week, :filter_redirect
 
       attr_writer :log_level
@@ -32,6 +32,7 @@ module Rails
         @session_store                 = :cookie_store
         @session_options               = {}
         @time_zone                     = "UTC"
+        @time_zone_mapping             = nil
         @beginning_of_week             = :monday
         @log_level                     = nil
         @middleware                    = app_middleware
@@ -72,6 +73,14 @@ module Rails
         end
       end
 
+      def time_zone_mapping
+        @time_zone_mapping ||= ActiveSupport::TimeZone.MAPPING
+      end
+
+      def time_zone_mapping=(mapping)
+        @time_zone_mapping = mapping
+      end
+
       def paths
         @paths ||= begin
           paths = super
@@ -87,7 +96,7 @@ module Rails
           paths
         end
       end
-
+      
       # Loads and returns the entire raw configuration of database from
       # values stored in `config/database.yml`.
       def database_configuration

@@ -20,9 +20,9 @@ module ActiveSupport
 
       begin
         zone_default = Time.find_zone!(app.config.time_zone, false)
-      rescue TZInfo::InvalidTimezoneIdentifier
+      rescue ArgumentError
         zone_default = Time.find_zone!(app.config.time_zone, true)
-        ActiveSupport::Deprecation.warn("Setting the default time zone using a 'friendly' name is deprecated; change your config to use: config.timezone = 'Australia/Adelaide'")
+        ActiveSupport::Deprecation.warn("Setting the default time zone using a 'friendly' name is deprecated; change your config to use: config.timezone = '#{zone_default.tzinfo.identifier}'")
       end
 
       unless zone_default
