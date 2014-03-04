@@ -741,6 +741,7 @@ module ActiveRecord
 
         yaml_files.each_with_object({}) do |file, fixtures|
           FixtureSet::File.open(file) do |fh|
+            #TODO: fh.newer_than?(fixture_file_timestamp) 
             fh.each do |fixture_name, row|
               fixtures[fixture_name] = ActiveRecord::Fixture.new(row, model_class)
             end

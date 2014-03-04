@@ -24,6 +24,9 @@ module ActiveRecord
         rows.each(&block)
       end
 
+      def newer_than?(time)
+        ::File.mtime(@file) > time
+      end
 
       private
         def rows
