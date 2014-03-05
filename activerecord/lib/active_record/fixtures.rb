@@ -1,5 +1,6 @@
 require 'erb'
 require 'yaml'
+require 'json'
 require 'zlib'
 require 'active_support/dependencies'
 require 'active_record/fixture_set/file'
@@ -595,13 +596,30 @@ module ActiveRecord
     end
 
     def fixture_sql(conn)
+      file_dir = self.instance_variable_get("@path")
+      table_name = self.instance_variable_get("@name")
+      cont = FixtureSet::File.open(file_dir) do |fh|
+        if last_time_modified(table_name)
+          fh.newer_than?(last_time_modified(table_name))
+        else
+          true
+        end
+      end
+
       table_rows = self.table_rows
 
-      table_rows.keys.map { |table|
-        "DELETE FROM #{conn.quote_table_name(table)}"
-      }.concat table_rows.flat_map { |fixture_set_name, rows|
-        rows.map { |row| conn.fixture_sql(row, fixture_set_name) }
-      }
+      if cont
+        sql_list = table_rows.keys.map { |table|
+          "DELETE FROM #{conn.quote_table_name(table)}"
+        }.concat table_rows.flat_map { |fixture_set_name, rows|
+          rows.map { |row| conn.fixture_sql(row, fixture_set_name) }
+        }
+
+        cache_sql sql_list, table_name
+        sql_list
+      else
+        read_cache_sql(table_name)
+      end
     end
 
     # Return a hash of rows to be inserted. The key is the table, the value is
@@ -697,6 +715,31 @@ module ActiveRecord
     end
 
     private
+
+      #TODO: Fix directory to Rails.root/tmp
+      #TODO: Fix breaking when table_name is admin/something (dir doesn't exist)
+      #      (and remove rescues)
+      def cache_sql(sql, table_name)
+        ::File.open("/tmp/#{table_name}", ::File::RDWR|::File::CREAT) do |file|
+          file.write(sql) 
+        end
+        rescue
+      end
+
+      def last_time_modified(table_name)
+        if ::File.exists?("/tmp/#{table_name}")
+          ::File.mtime("/tmp/#{table_name}")
+        else
+          nil
+        end
+        rescue
+      end
+
+      def read_cache_sql(table_name)
+        JSON.parse(::File.read("/tmp/#{table_name}"))
+        rescue
+      end
+
       def primary_key_name
         @primary_key_name ||= model_class && model_class.primary_key
       end
@@ -741,7 +784,6 @@ module ActiveRecord
 
         yaml_files.each_with_object({}) do |file, fixtures|
           FixtureSet::File.open(file) do |fh|
-            #TODO: fh.newer_than?(fixture_file_timestamp) 
             fh.each do |fixture_name, row|
               fixtures[fixture_name] = ActiveRecord::Fixture.new(row, model_class)
             end

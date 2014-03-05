@@ -25,7 +25,7 @@ module ActiveRecord
       end
 
       def newer_than?(time)
-        ::File.mtime(@file) > time
+        ::File.mtime("#{@file}.yml") > time
       end
 
       private
