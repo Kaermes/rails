@@ -596,29 +596,19 @@ module ActiveRecord
     end
 
     def fixture_sql(conn)
-      file_dir = self.instance_variable_get("@path")
-      table_name = self.instance_variable_get("@name")
-      cont = FixtureSet::File.open(file_dir) do |fh|
-        if last_time_modified(table_name)
-          fh.newer_than?(last_time_modified(table_name))
-        else
-          true
-        end
-      end
-
       table_rows = self.table_rows
 
-      if cont
+      if fixture_sql_cached?
         sql_list = table_rows.keys.map { |table|
           "DELETE FROM #{conn.quote_table_name(table)}"
         }.concat table_rows.flat_map { |fixture_set_name, rows|
           rows.map { |row| conn.fixture_sql(row, fixture_set_name) }
         }
 
-        cache_sql sql_list, table_name
+        cache_sql sql_list, @name
         sql_list
       else
-        read_cache_sql(table_name)
+        read_cache_sql(@name)
       end
     end
 
@@ -721,7 +711,7 @@ module ActiveRecord
       #      (and remove rescues)
       def cache_sql(sql, table_name)
         ::File.open("/tmp/#{table_name}", ::File::RDWR|::File::CREAT) do |file|
-          file.write(sql) 
+          file.write(sql.to_json) 
         end
         rescue
       end
@@ -738,6 +728,16 @@ module ActiveRecord
       def read_cache_sql(table_name)
         JSON.parse(::File.read("/tmp/#{table_name}"))
         rescue
+      end
+
+      def fixture_sql_cached?
+        FixtureSet::File.open(@path) do |fh|
+          if last_time_modified(@name)
+            fh.newer_than?(last_time_modified(@name))
+          else
+            true
+          end
+        end
       end
 
       def primary_key_name
