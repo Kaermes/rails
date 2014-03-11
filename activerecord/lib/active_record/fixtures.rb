@@ -598,17 +598,19 @@ module ActiveRecord
     def fixture_sql(conn)
       table_rows = self.table_rows
 
-      if fixture_sql_cached?
+      if fixture_newer_than_cache?
+
+        #TODO: think we need to write cache per table_rows key so we know which fixtures to load
         sql_list = table_rows.keys.map { |table|
           "DELETE FROM #{conn.quote_table_name(table)}"
         }.concat table_rows.flat_map { |fixture_set_name, rows|
           rows.map { |row| conn.fixture_sql(row, fixture_set_name) }
         }
 
-        cache_sql sql_list, @name
+        cache_sql sql_list, table_name #not like this
         sql_list
       else
-        read_cache_sql(@name)
+        read_cache_sql, table_name #not like this
       end
     end
 
@@ -710,34 +712,37 @@ module ActiveRecord
       #TODO: Fix breaking when table_name is admin/something (dir doesn't exist)
       #      (and remove rescues)
       def cache_sql(sql, table_name)
-        ::File.open("/tmp/#{table_name}", ::File::RDWR|::File::CREAT) do |file|
+        ::File.open("/tmp/#{gsub_table_name(table_name)}", ::File::RDWR|::File::TRUNC|::File::CREAT) do |file|
           file.write(sql.to_json) 
         end
-        rescue
+        rescue => error
+          p error
       end
 
-      def last_time_modified(table_name)
-        if ::File.exists?("/tmp/#{table_name}")
-          ::File.mtime("/tmp/#{table_name}")
+      def last_time_modified
+        if ::File.exists?("/tmp/#{gsub_table_name(table_name)}")
+          ::File.mtime("/tmp/#{gsub_table_name(table_name)}")
         else
           nil
         end
-        rescue
       end
 
       def read_cache_sql(table_name)
-        JSON.parse(::File.read("/tmp/#{table_name}"))
-        rescue
+        JSON.parse(::File.read("/tmp/#{gsub_table_name(table_name)}"))
       end
 
-      def fixture_sql_cached?
+      def fixture_newer_than_cache?
         FixtureSet::File.open(@path) do |fh|
-          if last_time_modified(@name)
-            fh.newer_than?(last_time_modified(@name))
+          if last_time_modified
+            fh.newer_than?(last_time_modified)
           else
             true
           end
         end
+      end
+
+      def gsub_table_name(tn)
+        tn.to_s.gsub(/\//, "_")
       end
 
       def primary_key_name
@@ -835,6 +840,9 @@ module ActiveRecord
 
     def find
       if model_class
+        if fixture[model_class.primary_key].nil? #jostain syystä tätä käy - syy jossain table_rowssa......
+          p model_class
+        end
         model_class.find(fixture[model_class.primary_key])
       else
         raise FixtureClassNotFound, "No class attached to find."
