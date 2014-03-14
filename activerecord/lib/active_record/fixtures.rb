@@ -711,7 +711,7 @@ module ActiveRecord
       #TODO: Fix breaking when table_name is admin/something (dir doesn't exist)
       #      (and remove rescues)
       def cache_sql(sql)
-        ::File.open("/tmp/#{gsub_table_name(@name)}", ::File::RDWR|::File::TRUNC|::File::CREAT) do |file|
+        ::File.open("/tmp/#{cache_name}", ::File::RDWR|::File::TRUNC|::File::CREAT) do |file|
           file.write(sql.to_json) 
         end
         rescue => error
@@ -719,15 +719,15 @@ module ActiveRecord
       end
 
       def last_time_modified
-        if ::File.exists?("/tmp/#{gsub_table_name(@name)}")
-          ::File.mtime("/tmp/#{gsub_table_name(@name)}")
+        if ::File.exists?("/tmp/#{cache_name}")
+          ::File.mtime("/tmp/#{cache_name}")
         else
           nil
         end
       end
 
       def read_cache_sql
-        JSON.parse(::File.read("/tmp/#{gsub_table_name(@name)}"))
+        JSON.parse(::File.read("/tmp/#{cache_name}"))
       end
 
       def fixture_newer_than_cache?
@@ -740,8 +740,8 @@ module ActiveRecord
         end
       end
 
-      def gsub_table_name(tn)
-        tn.to_s.gsub(/\//, "_")
+      def cache_name
+        "#{@name.to_s.gsub(/\//, "_")}_#{table_name}"
       end
 
       def primary_key_name
