@@ -600,17 +600,16 @@ module ActiveRecord
 
       if fixture_newer_than_cache?
 
-        #TODO: think we need to write cache per table_rows key so we know which fixtures to load
         sql_list = table_rows.keys.map { |table|
           "DELETE FROM #{conn.quote_table_name(table)}"
         }.concat table_rows.flat_map { |fixture_set_name, rows|
           rows.map { |row| conn.fixture_sql(row, fixture_set_name) }
         }
 
-        cache_sql sql_list, table_name #not like this
-        sql_list
-      else
-        read_cache_sql, table_name #not like this
+        cache_sql sql_list #caching ready-made sql per fixture file would be fine,
+        sql_list           #BUT we have cases "use fixture file 'items', but the table is 'books'
+      else                 #and so we'd end up with one cached fixture, which only works for the first one of these
+        read_cache_sql
       end
     end
 
@@ -711,8 +710,8 @@ module ActiveRecord
       #TODO: Fix directory to Rails.root/tmp
       #TODO: Fix breaking when table_name is admin/something (dir doesn't exist)
       #      (and remove rescues)
-      def cache_sql(sql, table_name)
-        ::File.open("/tmp/#{gsub_table_name(table_name)}", ::File::RDWR|::File::TRUNC|::File::CREAT) do |file|
+      def cache_sql(sql)
+        ::File.open("/tmp/#{gsub_table_name(@name)}", ::File::RDWR|::File::TRUNC|::File::CREAT) do |file|
           file.write(sql.to_json) 
         end
         rescue => error
@@ -720,15 +719,15 @@ module ActiveRecord
       end
 
       def last_time_modified
-        if ::File.exists?("/tmp/#{gsub_table_name(table_name)}")
-          ::File.mtime("/tmp/#{gsub_table_name(table_name)}")
+        if ::File.exists?("/tmp/#{gsub_table_name(@name)}")
+          ::File.mtime("/tmp/#{gsub_table_name(@name)}")
         else
           nil
         end
       end
 
-      def read_cache_sql(table_name)
-        JSON.parse(::File.read("/tmp/#{gsub_table_name(table_name)}"))
+      def read_cache_sql
+        JSON.parse(::File.read("/tmp/#{gsub_table_name(@name)}"))
       end
 
       def fixture_newer_than_cache?
@@ -840,9 +839,6 @@ module ActiveRecord
 
     def find
       if model_class
-        if fixture[model_class.primary_key].nil? #jostain syystä tätä käy - syy jossain table_rowssa......
-          p model_class
-        end
         model_class.find(fixture[model_class.primary_key])
       else
         raise FixtureClassNotFound, "No class attached to find."
