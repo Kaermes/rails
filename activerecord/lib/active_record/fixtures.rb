@@ -393,6 +393,9 @@ module ActiveRecord
     # An instance of FixtureSet is normally stored in a single YAML file and possibly in a folder with the same name.
     #++
 
+    
+    $TIMES ||= {}
+
     MAX_ID = 2 ** 30 - 1
 
     @@all_cached_fixtures = Hash.new { |h,k| h[k] = {} }
@@ -401,6 +404,19 @@ module ActiveRecord
       config.pluralize_table_names ?
         fixture_set_name.singularize.camelize :
         fixture_set_name.camelize
+    end
+
+    def self.time_this_bit(name)
+      t1 = Time.now
+      x = yield
+      t2 = Time.now
+
+      if $TIMES[name]
+        $TIMES[name] += t2 - t1
+      else
+        $TIMES[name] = t2 - t1
+      end
+      x
     end
 
     def self.default_fixture_table_name(fixture_set_name, config = ActiveRecord::Base) # :nodoc:
@@ -492,53 +508,86 @@ module ActiveRecord
       end
     end
 
-    def self.create_fixtures(fixtures_directory, fixture_set_names, class_names = {}, config = ActiveRecord::Base)
+    def self.benchmarks
+      $TIMES['connection'] = $TIMES['connection'] - $TIMES['fixture sql']
+      $TIMES['fixture sql'] = $TIMES['fixture sql'] - $TIMES['execute sql']
+      total = 0
+      $TIMES.each do |x, y|
+        p "#{x}: #{y}"
+        total += y
+      end
+      p "TOTAL: #{total}"
+    end
+
+    def self.create_fixtures(fixtures_directory, fixture_set_names, class_names = {}, config = ActiveRecord::Base, use_cache = false)
       fixture_set_names = Array(fixture_set_names).map(&:to_s)
       class_names = ClassCache.new class_names, config
 
-      # FIXME: Apparently JK uses this.
-      connection = block_given? ? yield : ActiveRecord::Base.connection
+      connection = nil
 
-      files_to_read = fixture_set_names.reject { |fs_name|
-        fixture_is_cached?(connection, fs_name)
-      }
+      # FIXME: Apparently JK uses this.
+      time_this_bit('set connection') do
+        connection = block_given? ? yield : ActiveRecord::Base.connection
+      end
+
+      #commented out to make testing fixture creation times easier
+      files_to_read = fixture_set_names#.reject { |fs_name|
+      #  fixture_is_cached?(connection, fs_name)
+      #}
 
       unless files_to_read.empty?
         connection.disable_referential_integrity do
           fixtures_map = {}
 
           fixture_sets = files_to_read.map do |fs_name|
-            klass = class_names[fs_name]
-            conn = klass ? klass.connection : connection
-            fixtures_map[fs_name] = new( # ActiveRecord::FixtureSet.new
-              conn,
-              fs_name,
-              klass,
-              ::File.join(fixtures_directory, fs_name))
+            time_this_bit('create fixturesets') do
+              klass = class_names[fs_name]
+              conn = klass ? klass.connection : connection
+              fixtures_map[fs_name] = new( # ActiveRecord::FixtureSet.new
+                conn,
+                fs_name,
+                klass,
+                ::File.join(fixtures_directory, fs_name),
+                ActiveRecord::Base,
+                use_cache)
+            end
           end
 
-          all_loaded_fixtures.update(fixtures_map)
+          time_this_bit('update all loaded fixtures') do
+            all_loaded_fixtures.update(fixtures_map)
+          end
 
-          connection.transaction(:requires_new => true) do
-            fixture_sets.each do |fs|
-              conn = fs.model_class.respond_to?(:connection) ? fs.model_class.connection : connection
-              fs.fixture_sql(conn).each do |stmt|
-                conn.execute stmt
-              end
-            end
-
-            # Cap primary key sequences to max(pk).
-            if connection.respond_to?(:reset_pk_sequence!)
+          time_this_bit('connection') do
+            connection.transaction(:requires_new => true) do
               fixture_sets.each do |fs|
-                connection.reset_pk_sequence!(fs.table_name)
+                conn = fs.model_class.respond_to?(:connection) ? fs.model_class.connection : connection
+                time_this_bit('fixture sql') do
+                  fs.fixture_sql(conn).each do |stmt|
+                    time_this_bit('execute sql') do
+                      conn.execute stmt
+                    end
+                  end
+                end
+              end
+
+              # Cap primary key sequences to max(pk).
+              if connection.respond_to?(:reset_pk_sequence!)
+                time_this_bit('Cap primary key sequences to max(pk)') do
+                  fixture_sets.each do |fs|
+                    connection.reset_pk_sequence!(fs.table_name)
+                  end
+                end
               end
             end
           end
-
-          cache_fixtures(connection, fixtures_map)
+          time_this_bit('cache_fixtures (in-memory)') do
+            cache_fixtures(connection, fixtures_map)
+          end
         end
       end
-      cached_fixtures(connection, fixture_set_names)
+      time_this_bit('cached_fixtures (in-memory)') do
+        cached_fixtures(connection, fixture_set_names)
+      end
     end
 
     # Returns a consistent, platform-independent identifier for +label+.
@@ -554,11 +603,12 @@ module ActiveRecord
 
     attr_reader :table_name, :name, :fixtures, :model_class, :config
 
-    def initialize(connection, name, class_name, path, config = ActiveRecord::Base)
+    def initialize(connection, name, class_name, path, config = ActiveRecord::Base, use_cache = false)
       @name     = name
       @path     = path
       @config   = config
       @model_class = nil
+      @use_cache = use_cache
 
       if class_name.is_a?(String)
         ActiveSupport::Deprecation.warn("The ability to pass in strings as a class name to `FixtureSet.new` will be removed in Rails 4.2. Use the class itself instead.")
@@ -576,7 +626,14 @@ module ActiveRecord
                       model_class.table_name :
                       self.class.default_fixture_table_name(name, config) )
 
-      @fixtures = read_fixture_files path, @model_class
+      @update_cache = fixture_newer_than_cache?
+
+      if !@use_cache or @update_cache
+        fixture_newer_than_cache?
+        @fixtures = read_fixture_files path, @model_class
+      else
+        @fixtures = read_cached_fixture
+      end
     end
 
     def [](x)
@@ -598,19 +655,16 @@ module ActiveRecord
     def fixture_sql(conn)
       table_rows = self.table_rows
 
-      if fixture_newer_than_cache?
+      sql_list = table_rows.keys.map { |table|
+        "DELETE FROM #{conn.quote_table_name(table)}"
+      }.concat table_rows.flat_map { |fixture_set_name, rows|
+        rows.map { |row| conn.fixture_sql(row, fixture_set_name) }
+      }
 
-        sql_list = table_rows.keys.map { |table|
-          "DELETE FROM #{conn.quote_table_name(table)}"
-        }.concat table_rows.flat_map { |fixture_set_name, rows|
-          rows.map { |row| conn.fixture_sql(row, fixture_set_name) }
-        }
-
-        cache_sql sql_list #caching ready-made sql per fixture file would be fine,
-        sql_list           #BUT we have cases "use fixture file 'items', but the table is 'books'
-      else                 #and so we'd end up with one cached fixture, which only works for the first one of these
-        read_cache_sql
+      if @use_cache and @update_cache
+        cache_fixtures_to_file
       end
+      sql_list
     end
 
     # Return a hash of rows to be inserted. The key is the table, the value is
@@ -680,7 +734,6 @@ module ActiveRecord
       end
       rows
     end
-
     class ReflectionProxy # :nodoc:
       def initialize(association)
         @association = association
@@ -708,14 +761,10 @@ module ActiveRecord
     private
 
       #TODO: Fix directory to Rails.root/tmp
-      #TODO: Fix breaking when table_name is admin/something (dir doesn't exist)
-      #      (and remove rescues)
-      def cache_sql(sql)
+      def cache_fixtures_to_file
         ::File.open("/tmp/#{cache_name}", ::File::RDWR|::File::TRUNC|::File::CREAT) do |file|
-          file.write(sql.to_json) 
+          file.write(Marshal.dump(fixtures)) 
         end
-        rescue => error
-          p error
       end
 
       def last_time_modified
@@ -726,8 +775,8 @@ module ActiveRecord
         end
       end
 
-      def read_cache_sql
-        JSON.parse(::File.read("/tmp/#{cache_name}"))
+      def read_cached_fixture
+        Marshal.load(::File.read("/tmp/#{cache_name}"))
       end
 
       def fixture_newer_than_cache?
@@ -740,8 +789,8 @@ module ActiveRecord
         end
       end
 
-      def cache_name
-        "#{@name.to_s.gsub(/\//, "_")}_#{table_name}"
+      def cache_name #TODO: this one should be changed to something better...
+        "#{@model_class.class}#{@path}#{@name.to_s}_#{table_name}".gsub(/\//, "_")
       end
 
       def primary_key_name
@@ -850,6 +899,7 @@ end
 module ActiveRecord
   module TestFixtures
     extend ActiveSupport::Concern
+
 
     def before_setup
       setup_fixtures
