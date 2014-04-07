@@ -626,11 +626,9 @@ module ActiveRecord
                       model_class.table_name :
                       self.class.default_fixture_table_name(name, config) )
 
-      @update_cache = fixture_newer_than_cache?
-
-      if !@use_cache or @update_cache
-        fixture_newer_than_cache?
+      if !@use_cache or fixture_newer_than_cache?
         @fixtures = read_fixture_files path, @model_class
+        cache_fixtures_to_file
       else
         @fixtures = read_cached_fixture
       end
@@ -655,16 +653,11 @@ module ActiveRecord
     def fixture_sql(conn)
       table_rows = self.table_rows
 
-      sql_list = table_rows.keys.map { |table|
+      table_rows.keys.map { |table|
         "DELETE FROM #{conn.quote_table_name(table)}"
       }.concat table_rows.flat_map { |fixture_set_name, rows|
         rows.map { |row| conn.fixture_sql(row, fixture_set_name) }
       }
-
-      if @use_cache and @update_cache
-        cache_fixtures_to_file
-      end
-      sql_list
     end
 
     # Return a hash of rows to be inserted. The key is the table, the value is
