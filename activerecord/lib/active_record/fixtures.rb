@@ -393,9 +393,6 @@ module ActiveRecord
     # An instance of FixtureSet is normally stored in a single YAML file and possibly in a folder with the same name.
     #++
 
-    
-    $TIMES ||= {}
-
     MAX_ID = 2 ** 30 - 1
 
     @@all_cached_fixtures = Hash.new { |h,k| h[k] = {} }
@@ -404,19 +401,6 @@ module ActiveRecord
       config.pluralize_table_names ?
         fixture_set_name.singularize.camelize :
         fixture_set_name.camelize
-    end
-
-    def self.time_this_bit(name)
-      t1 = Time.now
-      x = yield
-      t2 = Time.now
-
-      if $TIMES[name]
-        $TIMES[name] += t2 - t1
-      else
-        $TIMES[name] = t2 - t1
-      end
-      x
     end
 
     def self.default_fixture_table_name(fixture_set_name, config = ActiveRecord::Base) # :nodoc:
@@ -508,17 +492,6 @@ module ActiveRecord
       end
     end
 
-    def self.benchmarks
-      $TIMES['connection'] = $TIMES['connection'] - $TIMES['fixture sql']
-      $TIMES['fixture sql'] = $TIMES['fixture sql'] - $TIMES['execute sql']
-      total = 0
-      $TIMES.each do |x, y|
-        p "#{x}: #{y}"
-        total += y
-      end
-      p "TOTAL: #{total}"
-    end
-
     def self.create_fixtures(fixtures_directory, fixture_set_names, class_names = {}, config = ActiveRecord::Base, use_cache = false)
       fixture_set_names = Array(fixture_set_names).map(&:to_s)
       class_names = ClassCache.new class_names, config
@@ -526,68 +499,49 @@ module ActiveRecord
       connection = nil
 
       # FIXME: Apparently JK uses this.
-      time_this_bit('set connection') do
-        connection = block_given? ? yield : ActiveRecord::Base.connection
-      end
+      connection = block_given? ? yield : ActiveRecord::Base.connection
 
-      #commented out to make testing fixture creation times easier
-      files_to_read = fixture_set_names#.reject { |fs_name|
-      #  fixture_is_cached?(connection, fs_name)
-      #}
+      files_to_read = fixture_set_names.reject { |fs_name|
+        fixture_is_cached?(connection, fs_name)
+      }
 
       unless files_to_read.empty?
         connection.disable_referential_integrity do
           fixtures_map = {}
 
           fixture_sets = files_to_read.map do |fs_name|
-            time_this_bit('create fixturesets') do
-              klass = class_names[fs_name]
-              conn = klass ? klass.connection : connection
-              fixtures_map[fs_name] = new( # ActiveRecord::FixtureSet.new
-                conn,
-                fs_name,
-                klass,
-                ::File.join(fixtures_directory, fs_name),
-                ActiveRecord::Base,
-                use_cache)
+            klass = class_names[fs_name]
+            conn = klass ? klass.connection : connection
+            fixtures_map[fs_name] = new( # ActiveRecord::FixtureSet.new
+              conn,
+              fs_name,
+              klass,
+              ::File.join(fixtures_directory, fs_name),
+              ActiveRecord::Base,
+              use_cache)
+          end
+
+          all_loaded_fixtures.update(fixtures_map)
+
+          connection.transaction(:requires_new => true) do
+            fixture_sets.each do |fs|
+              conn = fs.model_class.respond_to?(:connection) ? fs.model_class.connection : connection
+                fs.fixture_sql(conn).each do |stmt|
+                  conn.execute stmt
+                end
             end
-          end
 
-          time_this_bit('update all loaded fixtures') do
-            all_loaded_fixtures.update(fixtures_map)
-          end
-
-          time_this_bit('connection') do
-            connection.transaction(:requires_new => true) do
+            # Cap primary key sequences to max(pk).
+            if connection.respond_to?(:reset_pk_sequence!)
               fixture_sets.each do |fs|
-                conn = fs.model_class.respond_to?(:connection) ? fs.model_class.connection : connection
-                time_this_bit('fixture sql') do
-                  fs.fixture_sql(conn).each do |stmt|
-                    time_this_bit('execute sql') do
-                      conn.execute stmt
-                    end
-                  end
-                end
-              end
-
-              # Cap primary key sequences to max(pk).
-              if connection.respond_to?(:reset_pk_sequence!)
-                time_this_bit('Cap primary key sequences to max(pk)') do
-                  fixture_sets.each do |fs|
-                    connection.reset_pk_sequence!(fs.table_name)
-                  end
-                end
+                connection.reset_pk_sequence!(fs.table_name)
               end
             end
           end
-          time_this_bit('cache_fixtures (in-memory)') do
-            cache_fixtures(connection, fixtures_map)
-          end
+          cache_fixtures(connection, fixtures_map)
         end
       end
-      time_this_bit('cached_fixtures (in-memory)') do
-        cached_fixtures(connection, fixture_set_names)
-      end
+      cached_fixtures(connection, fixture_set_names)
     end
 
     # Returns a consistent, platform-independent identifier for +label+.

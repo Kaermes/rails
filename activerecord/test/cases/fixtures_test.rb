@@ -23,7 +23,6 @@ require 'models/topic'
 require 'models/traffic_light'
 require 'models/treasure'
 require 'tempfile'
-require 'benchmark'
 
 class FixturesTest < ActiveRecord::TestCase
   self.use_instantiated_fixtures = true
@@ -32,21 +31,9 @@ class FixturesTest < ActiveRecord::TestCase
   # other_topics fixture should not be included here
   fixtures :topics, :developers, :accounts, :tasks, :categories, :funny_jokes, :binaries, :traffic_lights
 
-  LESS_FIXTURES = %w( accounts binaries )
   FIXTURES = %w( accounts binaries companies customers
                  developers developers_projects entrants
                  movies projects subscribers topics tasks )
-  MORE_FIXTURES = %w( accounts binaries companies customers
-                 developers developers_projects entrants
-                 movies projects subscribers topics tasks author_addresses
-                 author_favorites authors categories clubs
-                 collections colleges comments computers courses
-                 dashboards dog_lovers dogs edges essays
-                 friendships items jobs legacy_things
-                 mateys members minivans mixins owners parrots
-                 people pirates pets posts products ratings readers
-                 references ships tags topics toys)
-
 
   MATCH_ATTRIBUTE_NAME = /[a-zA-Z][-\w]*/
 
@@ -61,29 +48,6 @@ class FixturesTest < ActiveRecord::TestCase
         }
       }
     end
-  end
-
-
-  def test_fixture_time_cached
-    puts "**** CACHE"
-    100.times do
-      MORE_FIXTURES.each do |name|
-        ActiveRecord::FixtureSet.create_fixtures(FIXTURES_ROOT, name, {}, ActiveRecord::Base, true)
-      end
-    end
-
-    ActiveRecord::FixtureSet.benchmarks
-  end
-
-  def test_fixture_time_no_cache
-    puts "**** NO CACHE"
-    100.times do
-      MORE_FIXTURES.each do |name|
-        ActiveRecord::FixtureSet.create_fixtures(FIXTURES_ROOT, name, {}, ActiveRecord::Base, false)       
-      end
-    end
-
-    ActiveRecord::FixtureSet.benchmarks
   end
 
   def test_broken_yaml_exception
