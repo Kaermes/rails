@@ -582,8 +582,7 @@ module ActiveRecord
 
       @update_cache = fixture_newer_than_cache?
 
-      if !@use_cache or @update_cache
-        fixture_newer_than_cache?
+      if !@use_cache || @update_cache
         @fixtures = read_fixture_files path, @model_class
       else
         @fixtures = read_cached_fixture
@@ -615,7 +614,7 @@ module ActiveRecord
         rows.map { |row| conn.fixture_sql(row, fixture_set_name) }
       }
 
-      if @use_cache and @update_cache
+      if @use_cache && @update_cache
         cache_fixtures_to_file
       end
       sql_list
@@ -717,7 +716,7 @@ module ActiveRecord
       #TODO: Fix directory to Rails.root/tmp
       def cache_fixtures_to_file
         ::File.open("/tmp/#{cache_name}", ::File::RDWR|::File::TRUNC|::File::CREAT) do |file|
-          file.write(Marshal.dump(fixtures)) 
+          file.write(Marshal.dump(fixtures))
         end
       end
 
