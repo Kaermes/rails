@@ -526,10 +526,16 @@ module ActiveRecord
           connection.transaction(:requires_new => true) do
             fixture_sets.each do |fs|
               conn = fs.model_class.respond_to?(:connection) ? fs.model_class.connection : connection
-                fs.fixture_sql(conn).each do |stmt|
-                  conn.execute stmt
-                end
-            end
+              table_rows = fs.table_rows
+
+              #write to cache at this point?
+
+              table_rows.keys.each do |table|
+                conn.delete "DELETE FROM #{conn.quote_table_name(table)}", 'Fixture Delete'
+              end
+              table_rows.each do |fixture_set_name, rows|
+                conn.insert_fixtures(rows, fixture_set_name)
+              end
 
             # Cap primary key sequences to max(pk).
             if connection.respond_to?(:reset_pk_sequence!)
