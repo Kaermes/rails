@@ -4,6 +4,7 @@ require 'json'
 require 'zlib'
 require 'active_support/dependencies'
 require 'active_record/fixture_set/file'
+require 'active_record/fixture_set/cache'
 require 'active_record/errors'
 
 module ActiveRecord
@@ -536,7 +537,7 @@ module ActiveRecord
               table_rows.each do |fixture_set_name, rows|
                 conn.insert_fixtures(rows, fixture_set_name)
               end
-
+            end
             # Cap primary key sequences to max(pk).
             if connection.respond_to?(:reset_pk_sequence!)
               fixture_sets.each do |fs|
@@ -586,12 +587,12 @@ module ActiveRecord
                       model_class.table_name :
                       self.class.default_fixture_table_name(name, config) )
 
-      @update_cache = fixture_newer_than_cache?
+      @update_cache = ActiveRecord::FixtureSet::Cache.fixture_newer_than_cache?(@path, unique_cache_name)
 
       if !@use_cache || @update_cache
         @fixtures = read_fixture_files path, @model_class
       else
-        @fixtures = read_cached_fixture
+        @fixtures = ActiveRecord::FixtureSet::Cache.read_cached_fixture(unique_cache_name)
       end
     end
 
@@ -621,7 +622,7 @@ module ActiveRecord
       }
 
       if @use_cache && @update_cache
-        cache_fixtures_to_file
+        ActiveRecord::FixtureSet::Cache.cache_fixtures_to_file(unique_cache_name)
       end
       sql_list
     end
@@ -719,36 +720,7 @@ module ActiveRecord
 
     private
 
-      #TODO: Fix directory to Rails.root/tmp
-      def cache_fixtures_to_file
-        ::File.open("/tmp/#{cache_name}", ::File::RDWR|::File::TRUNC|::File::CREAT) do |file|
-          file.write(Marshal.dump(fixtures))
-        end
-      end
-
-      def last_time_modified
-        if ::File.exists?("/tmp/#{cache_name}")
-          ::File.mtime("/tmp/#{cache_name}")
-        else
-          nil
-        end
-      end
-
-      def read_cached_fixture
-        Marshal.load(::File.read("/tmp/#{cache_name}"))
-      end
-
-      def fixture_newer_than_cache?
-        FixtureSet::File.open(@path) do |fh|
-          if last_time_modified
-            fh.newer_than?(last_time_modified)
-          else
-            true
-          end
-        end
-      end
-
-      def cache_name #TODO: this one should be changed to something better...
+      def unique_cache_name #TODO: this one should be changed to something better...
         "#{@model_class.class}#{@path}#{@name.to_s}_#{table_name}".gsub(/\//, "_")
       end
 
