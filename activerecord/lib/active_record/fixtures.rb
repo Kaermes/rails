@@ -1,6 +1,5 @@
 require 'erb'
 require 'yaml'
-require 'json'
 require 'zlib'
 require 'active_support/dependencies'
 require 'active_record/fixture_set/file'
@@ -493,11 +492,9 @@ module ActiveRecord
       end
     end
 
-    def self.create_fixtures(fixtures_directory, fixture_set_names, class_names = {}, config = ActiveRecord::Base, use_cache = false)
+    def self.create_fixtures(fixtures_directory, fixture_set_names, class_names = {}, config = ActiveRecord::Base, use_cache = true)
       fixture_set_names = Array(fixture_set_names).map(&:to_s)
       class_names = ClassCache.new class_names, config
-
-      connection = nil
 
       # FIXME: Apparently JK uses this.
       connection = block_given? ? yield : ActiveRecord::Base.connection
@@ -530,6 +527,9 @@ module ActiveRecord
               table_rows = fs.table_rows
 
               #write to cache at this point?
+              if use_cache && fs.cache_outdated?
+                ActiveRecord::FixtureSet::Cache.cache_fixtures(fs.unique_cache_name, fs.fixtures)
+              end
 
               table_rows.keys.each do |table|
                 conn.delete "DELETE FROM #{conn.quote_table_name(table)}", 'Fixture Delete'
@@ -538,6 +538,7 @@ module ActiveRecord
                 conn.insert_fixtures(rows, fixture_set_name)
               end
             end
+
             # Cap primary key sequences to max(pk).
             if connection.respond_to?(:reset_pk_sequence!)
               fixture_sets.each do |fs|
@@ -545,6 +546,7 @@ module ActiveRecord
               end
             end
           end
+
           cache_fixtures(connection, fixtures_map)
         end
       end
@@ -569,7 +571,6 @@ module ActiveRecord
       @path     = path
       @config   = config
       @model_class = nil
-      @use_cache = use_cache
 
       if class_name.is_a?(String)
         ActiveSupport::Deprecation.warn("The ability to pass in strings as a class name to `FixtureSet.new` will be removed in Rails 4.2. Use the class itself instead.")
@@ -587,9 +588,9 @@ module ActiveRecord
                       model_class.table_name :
                       self.class.default_fixture_table_name(name, config) )
 
-      @update_cache = ActiveRecord::FixtureSet::Cache.fixture_newer_than_cache?(@path, unique_cache_name)
+      @cache_outdated = ActiveRecord::FixtureSet::Cache.fixture_newer_than_cache?(@path, unique_cache_name)
 
-      if !@use_cache || @update_cache
+      if !use_cache || @cache_outdated
         @fixtures = read_fixture_files path, @model_class
       else
         @fixtures = ActiveRecord::FixtureSet::Cache.read_cached_fixture(unique_cache_name)
@@ -610,21 +611,6 @@ module ActiveRecord
 
     def size
       fixtures.size
-    end
-
-    def fixture_sql(conn)
-      table_rows = self.table_rows
-
-      sql_list = table_rows.keys.map { |table|
-        "DELETE FROM #{conn.quote_table_name(table)}"
-      }.concat table_rows.flat_map { |fixture_set_name, rows|
-        rows.map { |row| conn.fixture_sql(row, fixture_set_name) }
-      }
-
-      if @use_cache && @update_cache
-        ActiveRecord::FixtureSet::Cache.cache_fixtures_to_file(unique_cache_name)
-      end
-      sql_list
     end
 
     # Return a hash of rows to be inserted. The key is the table, the value is
@@ -694,6 +680,15 @@ module ActiveRecord
       end
       rows
     end
+
+    def cache_outdated?
+      @cache_outdated
+    end
+
+    def unique_cache_name #TODO: this one should be changed to something better...
+      "#{@model_class.class}#{@path}#{@name.to_s}_#{table_name}".gsub(/\//, "_")
+    end
+
     class ReflectionProxy # :nodoc:
       def initialize(association)
         @association = association
@@ -719,10 +714,6 @@ module ActiveRecord
     end
 
     private
-
-      def unique_cache_name #TODO: this one should be changed to something better...
-        "#{@model_class.class}#{@path}#{@name.to_s}_#{table_name}".gsub(/\//, "_")
-      end
 
       def primary_key_name
         @primary_key_name ||= model_class && model_class.primary_key
@@ -830,7 +821,6 @@ end
 module ActiveRecord
   module TestFixtures
     extend ActiveSupport::Concern
-
 
     def before_setup
       setup_fixtures

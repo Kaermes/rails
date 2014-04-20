@@ -4,7 +4,7 @@ module ActiveRecord
     class Cache # :nodoc:
 
       #TODO: Fix directory to Rails.root/tmp
-      def self.cache_fixtures_to_file(cache_name)
+      def self.cache_fixtures(cache_name, fixtures)
         ::File.open("/tmp/#{cache_name}", ::File::RDWR|::File::TRUNC|::File::CREAT) do |file|
           file.write(Marshal.dump(fixtures))
         end
@@ -24,8 +24,9 @@ module ActiveRecord
 
       def self.fixture_newer_than_cache?(path_to_fixture, cache_name)
         FixtureSet::File.open(path_to_fixture) do |fh|
-          if self.last_time_modified(cache_name)
-            fh.newer_than?(last_time_modified)
+          fixture_modified_time = last_time_modified(cache_name)
+          if fixture_modified_time
+            fh.newer_than?(fixture_modified_time)
           else
             true
           end
