@@ -526,17 +526,14 @@ module ActiveRecord
               conn = fs.model_class.respond_to?(:connection) ? fs.model_class.connection : connection
               table_rows = fs.table_rows
 
-              #write to cache at this point?
-              if use_cache && fs.cache_outdated?
-                ActiveRecord::FixtureSet::Cache.cache_fixtures(fs.unique_cache_name, fs.fixtures)
-              end
-
               table_rows.keys.each do |table|
                 conn.delete "DELETE FROM #{conn.quote_table_name(table)}", 'Fixture Delete'
               end
+
               table_rows.each do |fixture_set_name, rows|
                 conn.insert_fixtures(rows, fixture_set_name)
               end
+
             end
 
             # Cap primary key sequences to max(pk).
@@ -545,6 +542,7 @@ module ActiveRecord
                 connection.reset_pk_sequence!(fs.table_name)
               end
             end
+
           end
 
           cache_fixtures(connection, fixtures_map)
@@ -592,6 +590,9 @@ module ActiveRecord
 
       if !use_cache || @cache_outdated
         @fixtures = read_fixture_files path, @model_class
+        if use_cache
+          ActiveRecord::FixtureSet::Cache.cache_fixtures(unique_cache_name, @fixtures)
+        end
       else
         @fixtures = ActiveRecord::FixtureSet::Cache.read_cached_fixture(unique_cache_name)
       end
